@@ -1,5 +1,4 @@
 import os
-import openai
 from typing import List, Optional, Dict
 from multi_agent_orchestrator.agents import Agent, AgentOptions
 from multi_agent_orchestrator.types import ConversationMessage, ParticipantRole

@@ -1,2 +1,3 @@
-multi-agent-orchestrator 
+multi-agent-orchestrator[openai]
+multi-agent-orchestrator[all]
 python-dotenv
