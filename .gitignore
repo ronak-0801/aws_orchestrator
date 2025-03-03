@@ -178,3 +178,4 @@ cython_debug/
 generated_posts/
 openai_posts/
 dummy.py
+openai_demo.py

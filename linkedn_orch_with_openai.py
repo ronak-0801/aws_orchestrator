@@ -1,3 +1,5 @@
+# This is a openai implementation with using route_request and depending on aws bedrock
+
 from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator
 import os
@@ -160,7 +162,7 @@ async def generate_linkedin_post(topic):
     
     # Add delay between API calls
     print("\nWaiting between API calls...")
-    await asyncio.sleep(60)
+    await asyncio.sleep(1)
     
     # Step 2: Content Writing Phase
     print("\n2. Writing the initial post...")
@@ -180,7 +182,7 @@ async def generate_linkedin_post(topic):
     
     # Add delay between API calls
     print("\nWaiting between API calls...")
-    await asyncio.sleep(60)
+    await asyncio.sleep(2)
     
     # Step 3: Optimization Phase
     print("\n3. Optimizing the post...")
