@@ -1,13 +1,19 @@
-# This is a openai implementation with using route_request and depending on aws bedrock
+# This is a openai implementation with using route_request and not depending on aws bedrock , using openai classifier to remove dependency on aws bedrock
+# If classifier is not used then it defaults to aws bedrock
 
 from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator
+from multi_agent_orchestrator.classifiers import OpenAIClassifier, OpenAIClassifierOptions
 import os
 from dotenv import load_dotenv
 import json
 from datetime import datetime
 
 load_dotenv()
+
+custom_openai_classifier = OpenAIClassifier(OpenAIClassifierOptions(
+    api_key=os.getenv('OPENAI_API_KEY'),
+))
 
 def create_research_agent():
     """Creates an agent specialized in research and content planning"""
@@ -95,7 +101,7 @@ def create_engagement_optimizer_agent():
     ))
 
 async def generate_linkedin_post(topic):
-    orchestrator = MultiAgentOrchestrator()
+    orchestrator = MultiAgentOrchestrator(classifier=custom_openai_classifier)
     
     # Add all agents to the orchestrator
     orchestrator.add_agent(create_research_agent())

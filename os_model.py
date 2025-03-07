@@ -1,3 +1,5 @@
+# This GeminiAgent and GeminiAgentOptions will be used to create a custom agent that uses Google's Gemini model
+
 import os
 from typing import List, Optional, Dict
 from multi_agent_orchestrator.agents import Agent, AgentOptions

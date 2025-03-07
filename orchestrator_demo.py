@@ -1,14 +1,11 @@
 import uuid
 import asyncio
-from typing import Optional, List, Dict, Any
-import json
 import sys
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator, OrchestratorConfig
 from multi_agent_orchestrator.agents import (BedrockLLMAgent,
  BedrockLLMAgentOptions,
  AgentResponse,
  AgentCallbacks)
-from multi_agent_orchestrator.types import ConversationMessage, ParticipantRole
 
 orchestrator = MultiAgentOrchestrator(options=OrchestratorConfig(
   LOG_AGENT_CHAT=True,
