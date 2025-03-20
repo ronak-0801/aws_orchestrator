@@ -175,5 +175,6 @@ cython_debug/
 
 
 
-
+.chainlit/
 dummy.py
+.files/
