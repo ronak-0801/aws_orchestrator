@@ -17,6 +17,7 @@ from multi_agent_orchestrator.storage import InMemoryChatStorage
 # Load environment variables
 load_dotenv()
 
+# Use a single memory storage instance for the whole application
 memory_storage = InMemoryChatStorage()
 
 # Default user info
@@ -29,29 +30,24 @@ DEFAULT_USER = {
 # API endpoints
 PRODUCTS_API = "https://dummyjson.com/products?limit=100"  # Get up to 100 products
 
-# In-memory storage for user purchases
+# In-memory storage for user purchases with product cache
 user_purchases = {}
+_products_cache = None
+_products_cache_time = 0
+_products_cache_ttl = 300  # Cache TTL in seconds (5 minutes)
 
-# Order status progression with much shorter durations for testing
+# Order status sequence with shortened durations for demo
 ORDER_STATUS_SEQUENCE = [
-    {"status": "Processing", "duration": 5},  # 5 seconds
-    {"status": "Preparing for Shipment", "duration": 5},  # 5 seconds
-    {"status": "Shipped", "duration": 5},  # 5 seconds
-    {"status": "Out for Delivery", "duration": 5},  # 5 seconds
-    {"status": "Delivered", "duration": 0}  # Final state
+    {"status": "Processing", "duration": 5},
+    {"status": "Preparing for Shipment", "duration": 5},
+    {"status": "Shipped", "duration": 5},
+    {"status": "Out for Delivery", "duration": 5},
+    {"status": "Delivered", "duration": 0}
 ]
-
-# Global storage for status updates
-status_updates = {}
 
 # Function to update order status over time
 def update_order_status(user_id, order_id):
-    """
-    Updates the status of an order over time.
-    
-    :param user_id: The user ID
-    :param order_id: The order ID
-    """
+    """Updates the status of an order over time."""
     if user_id not in user_purchases:
         return
     
@@ -80,13 +76,16 @@ def update_order_status(user_id, order_id):
         # Wait for the specified duration
         time.sleep(status_info["duration"])
 
-# Function to fetch products from the DummyJSON API
+# Function to fetch products with caching
 def fetch_products():
-    """
-    Fetches product information from the DummyJSON API.
+    """Fetches product information from the DummyJSON API with caching."""
+    global _products_cache, _products_cache_time
     
-    :return: A dictionary mapping product IDs to product details
-    """
+    # Return cached products if available and not expired
+    current_time = time.time()
+    if _products_cache and (current_time - _products_cache_time) < _products_cache_ttl:
+        return _products_cache
+    
     try:
         response = requests.get(PRODUCTS_API)
         if response.status_code == 200:
@@ -94,39 +93,31 @@ def fetch_products():
             products = data.get('products', [])
             # Create a dictionary with product ID as key for easy lookup
             product_dict = {product['id']: product for product in products}
+            
+            # Update cache
+            _products_cache = product_dict
+            _products_cache_time = current_time
+            
             return product_dict
         else:
             print(f"Failed to fetch products. Status code: {response.status_code}")
-            return {}
+            return _products_cache or {}
     except Exception as e:
         print(f"Error fetching products: {str(e)}")
-        return {}
+        return _products_cache or {}
 
 # Function to get user purchases
 def get_user_purchases(user_id):
-    """
-    Gets the purchase history for a user.
-    
-    :param user_id: The user ID
-    :return: List of purchases for the user
-    """
+    """Gets the purchase history for a user."""
     return user_purchases.get(user_id, [])
 
 # Function to add a purchase for a user
 def add_user_purchase(user_id, product_id, product_name, quantity, price):
-    """
-    Adds a purchase to a user's purchase history.
-    
-    :param user_id: The user ID
-    :param product_id: The product ID
-    :param product_name: The product name
-    :param quantity: The quantity purchased
-    :param price: The price of the product
-    """
+    """Adds a purchase to a user's purchase history."""
     if user_id not in user_purchases:
         user_purchases[user_id] = []
     
-    # Generate a unique order ID that looks like a regular order ID
+    # Generate a unique order ID
     order_id = f"TG{str(uuid.uuid4())[:6].upper()}"
     
     # Calculate estimated delivery date (5 days from now)
@@ -156,73 +147,29 @@ def add_user_purchase(user_id, product_id, product_name, quantity, price):
     
     return purchase
 
-# Function to enrich orders with product details
-def enrich_orders_with_product_details(orders, products):
-    """
-    Enriches order data with product details.
-    
-    :param orders: List of orders
-    :param products: Dictionary of product details
-    :return: Enriched orders with product details
-    """
-    enriched_orders = []
-    
-    # Get a list of product values to use when IDs don't match
-    product_list = list(products.values())
-    total_products = len(product_list)
-    
-    for order in orders:
-        enriched_order = order.copy()
-        enriched_items = []
-        
-        # Process each item in the order
-        if 'items' in order:
-            for item in order['items']:
-                product_id = None
-                quantity = 1
-                
-                # Handle different item formats
-                if isinstance(item, dict) and 'product_id' in item:
-                    product_id = item['product_id']
-                    quantity = item.get('quantity', 1)
-                elif isinstance(item, int):
-                    product_id = item
-                
-                # Try to find product in our products dictionary
-                if product_id in products:
-                    product = products[product_id]
-                else:
-                    # If product ID doesn't exist in our products, assign a random product
-                    # Use the product_id as an index (with modulo to stay in bounds)
-                    fallback_index = (product_id % total_products) if total_products > 0 else 0
-                    product = product_list[fallback_index] if total_products > 0 else {"title": f"Product {product_id}"}
-                
-                # Create enriched item with product details
-                enriched_item = {
-                    'product_id': product_id,
-                    'name': product.get('title', f'Product {product_id}'),
-                    'price': product.get('price', 0),
-                    'quantity': quantity,
-                    'category': product.get('category', 'Unknown'),
-                    'description': product.get('description', '')[:100] + '...' if product.get('description', '') and len(product.get('description', '')) > 100 else product.get('description', ''),
-                    'image': product.get('thumbnail', '')
-                }
-                enriched_items.append(enriched_item)
-        
-        enriched_order['enriched_items'] = enriched_items
-        enriched_orders.append(enriched_order)
-    
-    return enriched_orders
-
-# Callback handler for streaming tokens with controlled speed
+# Optimized callback handler for streaming tokens
 class ChainlitAgentCallbacks(AgentCallbacks):
     def on_llm_new_token(self, token: str) -> None:
-        # Add a small delay between tokens for a more natural reading pace
-        time.sleep(0.01)  # 10ms delay between tokens
+        # Reduced delay for faster response time
+        time.sleep(0.005)  # 5ms delay between tokens - can be adjusted based on user preferences
         asyncio.run(cl.user_session.get("current_msg").stream_token(token))
 
-# Function to create and initialize the orchestrator with all agents
-def create_orchestrator(user_id):
+# Orchestrator and agent creation logic with caching
+_agent_cache = {}
+_agent_cache_time = {}
+_agent_cache_ttl = 60  # Cache TTL in seconds (1 minute)
+
+def create_orchestrator(user_id, force_refresh=False):
+    """Creates and initializes the orchestrator with all agents with caching."""
+    global _agent_cache, _agent_cache_time
+    
+    current_time = time.time()
+    cache_key = f"orchestrator_{user_id}"
+    
+    # Return cached orchestrator if available, not expired, and not forced to refresh
+    if not force_refresh and cache_key in _agent_cache and (current_time - _agent_cache_time.get(cache_key, 0)) < _agent_cache_ttl:
+        return _agent_cache[cache_key]
+    
     # Initialize the OpenAI classifier for routing requests
     custom_openai_classifier = OpenAIClassifier(OpenAIClassifierOptions(
         api_key=os.getenv('OPENAI_API_KEY'),
@@ -232,12 +179,9 @@ def create_orchestrator(user_id):
     orchestrator = MultiAgentOrchestrator(options=OrchestratorConfig(
         LOG_AGENT_CHAT=True,
         LOG_CLASSIFIER_CHAT=True,
-        LOG_CLASSIFIER_RAW_OUTPUT=True,
-        LOG_CLASSIFIER_OUTPUT=True,
-        LOG_EXECUTION_TIMES=True,
-        MAX_RETRIES=3,
+        MAX_RETRIES=2,  # Reduced from 3 to 2
         USE_DEFAULT_AGENT_IF_NONE_IDENTIFIED=True,
-        MAX_MESSAGE_PAIRS_PER_AGENT=10,
+        MAX_MESSAGE_PAIRS_PER_AGENT=8,  # Reduced from 10 to 8
         ),
         classifier=custom_openai_classifier,
         storage=memory_storage
@@ -261,21 +205,14 @@ def create_orchestrator(user_id):
         1. Agent Type: Choose the most appropriate agent type based on the nature of the query.
            For follow-up responses, use the same agent type as the previous interaction.
         2. Priority: Assign based on urgency and impact.
-           - High: Issues affecting service, urgent technical issues
-           - Medium: Non-urgent product inquiries, sales questions
-           - Low: General information requests, feedback
         3. Key Entities: Extract important product names or specific issues mentioned.
-        4. For follow-up responses, include relevant entities from the previous interaction if applicable.
-        5. Confidence: Indicate how confident you are in the classification.
-           - High: Clear, straightforward requests or clear follow-ups
-           - Medium: Requests with some ambiguity but likely classification
-           - Low: Vague or multi-faceted requests that could fit multiple categories
-
+        4. For follow-ups, include relevant entities from the previous interaction.
+        
         Company context:
         - TechGadgets Inc. sells electronics and accessories
-        - Order-related queries should go to the Order Agent
+        - Order-related queries go to the Order Agent
         - Product info and general questions go to the Query Agent
-        - Purchase-related queries should go to the Sales Agent
+        - Purchase-related queries go to the Sales Agent
         
         For short responses like "yes", "ok", "I want to know more", or numerical answers,
         treat them as follow-ups and maintain the previous agent selection.
@@ -287,21 +224,30 @@ def create_orchestrator(user_id):
     orchestrator.add_agent(create_order_agent(user_id))
     orchestrator.add_agent(create_sales_agent(user_id))
     
+    # Update cache
+    _agent_cache[cache_key] = orchestrator
+    _agent_cache_time[cache_key] = current_time
+    
     return orchestrator
 
-# Create query agent
+# Create query agent with optimized product info handling
 def create_query_agent():
     # Fetch products for the query agent
     products = fetch_products()
+    
+    # More efficient category and popular product extraction
     product_categories = set()
     popular_products = []
     
-    # Extract categories and select some popular products
-    for product in list(products.values())[:50]:  # Limit to first 20 for popular products
+    # Get a list of products
+    product_list = list(products.values())
+    
+    # Extract categories and select popular products (limit to what's needed)
+    for product in product_list[:20]:  # Limited to first 20 
         if 'category' in product:
             product_categories.add(product['category'])
         
-        if len(popular_products) < 5 and 'title' in product:
+        if len(popular_products) < 5 and 'title' in product and product.get('rating', 0) >= 4.5:
             popular_products.append({
                 'name': product['title'],
                 'price': product.get('price', 'N/A'),
@@ -309,21 +255,24 @@ def create_query_agent():
                 'rating': product.get('rating', 0)
             })
     
+    # Build product info once
     product_info = {
         'categories': list(product_categories),
         'popular_products': popular_products
     }
     
+    product_info_json = json.dumps(product_info, indent=2)
+    
     return OpenAIAgent(OpenAIAgentOptions(
         name='Query Agent',
         description='Specializes in answering customer FAQs, general inquiries, and product information',
         api_key=os.getenv('OPENAI_API_KEY'),
-        model='gpt-4o-mini',
+        model='gpt-4o-mini',  # Consider using a faster model if available
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
-        LOG_AGENT_DEBUG_TRACE=True,
+        LOG_AGENT_DEBUG_TRACE=False,  # Reduced logging to improve performance
         inference_config={
-            'maxTokens': 800,
+            'maxTokens': 600,  # Reduced from 800
             'temperature': 0.7
         },
         custom_system_prompt={
@@ -341,7 +290,7 @@ def create_query_agent():
             - Our headquarters is in San Francisco, CA
             
             Product information:
-            ''' + json.dumps(product_info, indent=2) + '''
+            ''' + product_info_json + '''
             
             Policies:
             - Return policy: 30-day return window for most products
@@ -349,29 +298,26 @@ def create_query_agent():
             - Shipping: Free shipping on orders over $50
             - Price match: We match prices from major competitors
             
-            When answering questions:
-            - Be friendly and helpful
-            - Provide specific information when available
-            - If you don't know the answer, say so and offer to connect the customer with someone who can help
-            - For detailed product specifications, recommend checking the product page on our website''',
+            When answering:
+            - Be concise and specific
+            - For detailed product specifications, recommend checking our website''',
         }
     ))
 
-# Create order agent
+# Create order agent with optimized order formatting
 def create_order_agent(user_id):
-    
     # Get user purchases - this should have the latest status
     purchases = get_user_purchases(user_id)
     
-    # Format orders for the agent
+    # Format orders for the agent - only include necessary fields
     formatted_orders = []
     
-    # Add user purchases as orders
-    for purchase in purchases:
+    # Add user purchases as orders (only the most recent 5 to reduce token usage)
+    for purchase in purchases[-5:]:
         formatted_order = {
             "order_id": purchase["order_id"],
             "date": purchase["date"],
-            "status": purchase["status"],  # This should have the updated status
+            "status": purchase["status"],
             "total_price": purchase["total"],
             "estimated_delivery": purchase.get("estimated_delivery", ""),
             "items": [{
@@ -401,9 +347,9 @@ def create_order_agent(user_id):
         model='gpt-4o-mini',
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
-        LOG_AGENT_DEBUG_TRACE=True,
+        LOG_AGENT_DEBUG_TRACE=False,  # Reduced logging
         inference_config={
-            'maxTokens': 800,
+            'maxTokens': 600,  # Reduced from 800
             'temperature': 0.4
         },
         custom_system_prompt={
@@ -418,52 +364,40 @@ def create_order_agent(user_id):
             ''' + formatted_user_data + '''
             
             When handling order-related queries:
-            - If the customer doesn't mention a specific order number, list their recent orders briefly
-            - For each order, show the order ID, status, and list the products
-            - If they mention a specific order number, provide complete details for that order
-            - If the customer has no orders yet, inform them that they haven't made any purchases
-            - For order modifications, explain the process clearly
-            - Always be helpful and solution-oriented
+            - Be concise but thorough
+            - For order status, show the order ID, status, and estimated delivery
+            - For specific order numbers, provide complete details
+            - Always be solution-oriented
             
-            Order status information:
-            - Processing: Order has been received and is being processed
-            - Preparing for Shipment: Order is being packed
-            - Shipped: Order has been shipped and is in transit
-            - Out for Delivery: Order is with the delivery carrier and will be delivered soon
-            - Delivered: Order has been delivered
-            
-            Shipping information:
-            - Standard shipping: 3-5 business days
-            - Express shipping: 1-2 business days
-            - International shipping: 7-14 business days''',
+            Order status progression:
+            Processing → Preparing for Shipment → Shipped → Out for Delivery → Delivered''',
         }
     ))
 
-# Create sales agent
+# Create sales agent with optimized product handling
 def create_sales_agent(user_id):
     # Fetch products for the sales agent
     products = fetch_products()
     
-    # Get user purchases
-    purchases = get_user_purchases(user_id)
+    # Get user purchases (limit to recent 3 to reduce data size)
+    purchases = get_user_purchases(user_id)[-3:]
     
-    # Format product data for the sales agent
+    # Format product data for the sales agent - select key fields only
     formatted_products = []
-    for product_id, product in products.items():
+    for product_id, product in list(products.items())[:20]:  # Limit to 20 products
         formatted_product = {
             'id': product_id,
             'name': product.get('title', f'Product {product_id}'),
             'price': product.get('price', 0),
             'category': product.get('category', 'Unknown'),
-            'description': product.get('description', '')[:100] + '...' if len(product.get('description', '')) > 100 else product.get('description', ''),
+            'description': product.get('description', '')[:80] + '...' if len(product.get('description', '')) > 80 else product.get('description', ''),
             'rating': product.get('rating', 0),
-            'stock': product.get('stock', 0),
             'brand': product.get('brand', 'Unknown')
         }
         formatted_products.append(formatted_product)
     
-    # Limit to 30 products to avoid token limits
-    formatted_products = formatted_products[:30]
+    products_json = json.dumps(formatted_products, indent=2)
+    purchases_json = json.dumps(purchases, indent=2)
     
     return OpenAIAgent(OpenAIAgentOptions(
         name='Sales Agent',
@@ -472,9 +406,9 @@ def create_sales_agent(user_id):
         model='gpt-4o-mini',
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
-        LOG_AGENT_DEBUG_TRACE=True,
+        LOG_AGENT_DEBUG_TRACE=False,  # Reduced logging
         inference_config={
-            'maxTokens': 800,
+            'maxTokens': 600,  # Reduced from 800
             'temperature': 0.5
         },
         custom_system_prompt={
@@ -486,31 +420,20 @@ def create_sales_agent(user_id):
             4. Assisting with the purchase process
             
             Available products:
-            ''' + json.dumps(formatted_products, indent=2) + '''
+            ''' + products_json + '''
             
             Customer's previous purchases:
-            ''' + json.dumps(purchases, indent=2) + '''
-            
-            When assisting customers:
-            - Ask clarifying questions to understand their needs
-            - Recommend products that match their requirements
-            - Highlight key features and benefits
-            
+            ''' + purchases_json + '''
             
             For purchase requests:
-            - When a customer expresses interest in buying a product, ask them how many they would like
-            - If they don't specify a quantity, assume they want 1 unit
-            - Ask them to confirm their purchase with a simple yes/no question
-            - Do NOT ask for payment details as this is a demo system
-            - Once they confirm, tell them you're processing their order
-            - Provide a purchase confirmation with the product name, quantity, price, and a thank you message
-            - Let them know they can check their order status with the Order Agent
+            - When a customer wants to buy, ask for quantity if not specified
+            - If quantity not specified, assume 1 unit
+            - Ask for purchase confirmation with a simple yes/no question
+            - Once confirmed, process the order
+            - Provide a purchase confirmation with details
+            - Let them know they can check order status with the Order Agent
             
-            Important: This is a demo system, so keep the purchase process simple. Just ask for quantity and confirmation, then complete the purchase.
-
-            Warranty information:
-            - All products come with a 1-year manufacturer warranty
-            - 30-day satisfaction guarantee''',
+            This is a demo system - keep the purchase process simple.''',
         }
     ))
 
@@ -521,15 +444,23 @@ async def start():
     cl.user_session.set("user_id", user_id)
     cl.user_session.set("session_id", str(uuid.uuid4()))
     cl.user_session.set("pending_purchase", None)
+    
+    # Pre-fetch products to warm up the cache
+    fetch_products()
+    
+    # Create orchestrator upfront to avoid delays in first interaction
+    orchestrator = create_orchestrator(user_id)
+    cl.user_session.set("orchestrator", orchestrator)
+    
     # Send welcome message
     await cl.Message(
-        content=f"""# Welcome to TechGadgets Customer Support
+        content="""# Welcome to TechGadgets Customer Support
         
-You're logged in as: {DEFAULT_USER['email']} (Demo User)
+You're logged in as: demo@user.com (Demo User)
 
 ### Sample questions you can ask:
 - What's your return policy?
-- I want to check my order status
+- Check my order status
 - Can I change my shipping address?
 - What products do you recommend for gaming?
 - I want to cancel my order
@@ -546,19 +477,21 @@ async def main(message: cl.Message):
     user_id = cl.user_session.get("user_id")
     session_id = cl.user_session.get("session_id")
     
-    # Always recreate the orchestrator to get the latest order status
-    orchestrator = create_orchestrator(user_id)
-    cl.user_session.set("orchestrator", orchestrator)
+    # Get the existing orchestrator (or create if needed)
+    orchestrator = cl.user_session.get("orchestrator")
+    if not orchestrator:
+        orchestrator = create_orchestrator(user_id)
+        cl.user_session.set("orchestrator", orchestrator)
     
     # Create an empty message for streaming
     msg = cl.Message(content="")
-    await msg.send()  # Send the message immediately to start streaming
+    await msg.send()
     cl.user_session.set("current_msg", msg)
     
     # Check for pending purchase intent
     pending_purchase = cl.user_session.get("pending_purchase", None)
     
-    # If there's a pending purchase and the user confirms
+    # Handle purchase confirmation
     if pending_purchase and any(word in message.content.lower() for word in ["yes", "confirm", "sure", "ok", "okay", "proceed", "buy it"]):
         # Add the purchase to the user's history
         product_id = pending_purchase["product_id"]
@@ -569,17 +502,17 @@ async def main(message: cl.Message):
         # Create the purchase
         purchase = add_user_purchase(user_id, product_id, product_name, quantity, price)
         
-        # Create a new orchestrator with updated agents
-        orchestrator = create_orchestrator(user_id)
-        cl.user_session.set("orchestrator", orchestrator)
-        
         # Clear the pending purchase
         cl.user_session.set("pending_purchase", None)
         
-        # Send purchase confirmation with controlled streaming speed
+        # Force a refresh of the orchestrator to include the new purchase
+        orchestrator = create_orchestrator(user_id, force_refresh=True)
+        cl.user_session.set("orchestrator", orchestrator)
+        
+        # Send purchase confirmation
         confirmation = f"""# Purchase Confirmed!
 
-Your order has been successfully processed.
+Your order has been processed.
 
 **Order Details:**
 - **Order ID:** {purchase['order_id']}
@@ -587,51 +520,55 @@ Your order has been successfully processed.
 - **Quantity:** {quantity}
 - **Price:** ${price}
 - **Total:** ${price * quantity}
-- **Status:** {purchase['status']}
 - **Estimated Delivery:** {purchase['estimated_delivery']}
 
-Thank you for your purchase! You can check your order status anytime by asking about your orders or specifically about order {purchase['order_id']}.
-
-Note: Your order status will automatically update as it progresses through our system.
+Thank you for your purchase! You can check your order status anytime.
 """
-
-        # Stream the confirmation with a controlled pace
+        # Stream the confirmation with a faster pace
         for line in confirmation.split('\n'):
             await msg.stream_token(line + '\n')
-            await asyncio.sleep(0.1)  # 100ms delay between lines for better readability
+            await asyncio.sleep(0.05)  # 50ms delay between lines - faster than before
+        
         await msg.update()
         return
+    
+    # Check if the message is asking about orders
+    if any(phrase in message.content.lower() for phrase in ["my orders", "my order", "order status", "check order", "show orders", "view orders"]):
+        # Force refresh the orchestrator to get the latest order data
+        orchestrator = create_orchestrator(user_id, force_refresh=True)
+        cl.user_session.set("orchestrator", orchestrator)
     
     # Route the request to the appropriate agent
     response = await orchestrator.route_request(message.content, user_id, session_id, {})
     
-    # Check if the message contains purchase intent
-    if any(keyword in message.content.lower() for keyword in ["buy", "purchase", "order", "get me", "i want", "i'd like"]):
+    # Check if the message contains purchase intent - more specific patterns
+    if "buy" in message.content.lower() or "purchase" in message.content.lower() or "get me" in message.content.lower():
         # Extract product information from the message
         products = fetch_products()
         for product_id, product in products.items():
             product_name = product.get('title', '').lower()
-            if product_name.lower() in message.content.lower():
-                # Check if quantity is specified in the message
+            if product_name in message.content.lower():
+                # Check if quantity is specified
                 quantity = 1  # Default quantity
                 
-                # Look for quantity patterns
+                # Simplified quantity extraction
                 import re
-                quantity_match = re.search(r'(\d+)\s+' + re.escape(product_name), message.content.lower())
-                if not quantity_match:
-                    quantity_match = re.search(r'buy\s+(\d+)', message.content.lower())
-                if not quantity_match:
-                    quantity_match = re.search(r'get\s+(\d+)', message.content.lower())
-                if not quantity_match:
-                    quantity_match = re.search(r'order\s+(\d+)', message.content.lower())
-                if not quantity_match:
-                    quantity_match = re.search(r'purchase\s+(\d+)', message.content.lower())
-                    
-                if quantity_match:
-                    try:
-                        quantity = int(quantity_match.group(1))
-                    except:
-                        pass
+                quantity_patterns = [
+                    r'(\d+)\s+' + re.escape(product_name),
+                    r'buy\s+(\d+)',
+                    r'get\s+(\d+)',
+                    r'order\s+(\d+)',
+                    r'purchase\s+(\d+)'
+                ]
+                
+                for pattern in quantity_patterns:
+                    quantity_match = re.search(pattern, message.content.lower())
+                    if quantity_match:
+                        try:
+                            quantity = int(quantity_match.group(1))
+                            break
+                        except:
+                            pass
                 
                 # Store the purchase intent for confirmation
                 cl.user_session.set("pending_purchase", {
@@ -642,13 +579,12 @@ Note: Your order status will automatically update as it progresses through our s
                 })
                 
                 # Add a confirmation request to the response
-                confirmation_request = f"\n\nI see you're interested in purchasing {quantity} {product.get('title')} at a price of ${product.get('price', 0)} each. Would you like to confirm this purchase? (Just say 'yes' to confirm)"
+                confirmation_request = f"\n\nI see you want to purchase {quantity} {product.get('title')} at ${product.get('price', 0)} each. Would you like to confirm this purchase? (Say 'yes' to confirm)"
                 await msg.stream_token(confirmation_request)
                 break
     
-    # Handle non-streaming or problematic responses
+    # Handle non-streaming responses
     if isinstance(response, AgentResponse) and response.streaming is False:
-        # Handle regular response
         if isinstance(response.output, str):
             await msg.stream_token(response.output)
         elif isinstance(response.output, ConversationMessage):
