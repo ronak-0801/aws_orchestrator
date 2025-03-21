@@ -1,7 +1,6 @@
 import uuid
 import os
 import json
-from datetime import datetime
 import asyncio
 import chainlit as cl
 from dotenv import load_dotenv
@@ -9,9 +8,12 @@ from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions, Age
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator, OrchestratorConfig
 from multi_agent_orchestrator.classifiers import OpenAIClassifier, OpenAIClassifierOptions
 from multi_agent_orchestrator.types import ConversationMessage
+from multi_agent_orchestrator.storage import InMemoryChatStorage
 
 # Load environment variables
 load_dotenv()
+
+memory_storage = InMemoryChatStorage()
 
 # Default user with fake order data
 DEFAULT_USER = {
@@ -60,8 +62,47 @@ orchestrator = MultiAgentOrchestrator(options=OrchestratorConfig(
     USE_DEFAULT_AGENT_IF_NONE_IDENTIFIED=True,
     MAX_MESSAGE_PAIRS_PER_AGENT=10,
     ),
-    classifier=custom_openai_classifier
+    classifier=custom_openai_classifier,
+    storage = memory_storage
 )
+
+orchestrator.classifier.set_system_prompt(
+    """
+    You are a routing specialist for TechGadgets Inc. customer support. Your task is to analyze customer inquiries and direct them to the most appropriate agent.
+
+    Analyze the user's input and categorize it into one of the following agent types:
+    <agents>
+    {{AGENT_DESCRIPTIONS}}
+    </agents>
+
+    Previous conversation context:
+    <history>
+    {{HISTORY}}
+    </history>
+
+    Guidelines for classification:
+    1. Agent Type: Choose the most appropriate agent type based on the nature of the query.
+       For follow-up responses, use the same agent type as the previous interaction.
+    2. Priority: Assign based on urgency and impact.
+       - High: Issues affecting service, urgent technical issues
+       - Medium: Non-urgent product inquiries, sales questions
+       - Low: General information requests, feedback
+    3. Key Entities: Extract important product names or specific issues mentioned.
+    4. For follow-up responses, include relevant entities from the previous interaction if applicable.
+    5. Confidence: Indicate how confident you are in the classification.
+       - High: Clear, straightforward requests or clear follow-ups
+       - Medium: Requests with some ambiguity but likely classification
+       - Low: Vague or multi-faceted requests that could fit multiple categories
+
+    Company context:
+    - TechGadgets Inc. sells electronics and accessories
+    - Order-related queries should go to the Order Agent
+    - Product info and general questions go to the Query Agent
+    
+    For short responses like "yes", "ok", "I want to know more", or numerical answers,
+    treat them as follow-ups and maintain the previous agent selection.
+    """
+    )
 
 # Create query agent
 def create_query_agent():
@@ -71,6 +112,7 @@ def create_query_agent():
         api_key=os.getenv('OPENAI_API_KEY'),
         model='gpt-4o-mini',
         streaming=True,
+        LOG_AGENT_DEBUG_TRACE=True,
         inference_config={
             'maxTokens': 800,
             'temperature': 0.5
@@ -106,6 +148,7 @@ def create_order_agent():
         model='gpt-4o-mini',
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
+        LOG_AGENT_DEBUG_TRACE=True,
         inference_config={
             'maxTokens': 800,
             'temperature': 0.4
@@ -176,11 +219,6 @@ async def main(message: cl.Message):
     # Route the request to the appropriate agent
     response = await orchestrator.route_request(message.content, user_id, session_id, {})
     
-    # Add agent name as a prefix to the message instead of metadata
-    if hasattr(response, 'metadata') and hasattr(response.metadata, 'agent_name'):
-        agent_name = response.metadata.agent_name
-        await msg.stream_token(f"**[{agent_name}]** ")
-    
     # Handle non-streaming or problematic responses
     if isinstance(response, AgentResponse) and response.streaming is False:
         # Handle regular response
@@ -200,4 +238,4 @@ async def main(message: cl.Message):
     await msg.update()
 
 if __name__ == "__main__":
-    cl.run() 
+    cl.run()

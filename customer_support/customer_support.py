@@ -1,6 +1,7 @@
-from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions,AgentCallbacks
+from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator, OrchestratorConfig
 from multi_agent_orchestrator.classifiers import OpenAIClassifier, OpenAIClassifierOptions
+from multi_agent_orchestrator.storage import InMemoryChatStorage
 import os
 from dotenv import load_dotenv
 import json
@@ -9,9 +10,12 @@ import asyncio
 
 load_dotenv()
 
+memory_storage = InMemoryChatStorage()
+
 # Initialize the OpenAI classifier for routing requests
 custom_openai_classifier = OpenAIClassifier(OpenAIClassifierOptions(
     api_key=os.getenv('OPENAI_API_KEY'),
+    model_id="gpt-4o-mini"
 ))
 
 # Default user with fake order data
@@ -66,8 +70,46 @@ async def process_customer_query(query, session_id=None):
         MAX_MESSAGE_PAIRS_PER_AGENT=10,
         ),
         classifier=custom_openai_classifier, 
+        storage=memory_storage
+        )
+    
+    orchestrator.classifier.set_system_prompt(
+    """
+    You are a routing specialist for TechGadgets Inc. customer support. Your task is to analyze customer inquiries and direct them to the most appropriate agent.
 
-)
+    Analyze the user's input and categorize it into one of the following agent types:
+    <agents>
+    {{AGENT_DESCRIPTIONS}}
+    </agents>
+
+    Previous conversation context:
+    <history>
+    {{HISTORY}}
+    </history>
+
+    Guidelines for classification:
+    1. Agent Type: Choose the most appropriate agent type based on the nature of the query.
+       For follow-up responses, use the same agent type as the previous interaction.
+    2. Priority: Assign based on urgency and impact.
+       - High: Issues affecting service, urgent technical issues
+       - Medium: Non-urgent product inquiries, sales questions
+       - Low: General information requests, feedback
+    3. Key Entities: Extract important product names or specific issues mentioned.
+    4. For follow-up responses, include relevant entities from the previous interaction if applicable.
+    5. Confidence: Indicate how confident you are in the classification.
+       - High: Clear, straightforward requests or clear follow-ups
+       - Medium: Requests with some ambiguity but likely classification
+       - Low: Vague or multi-faceted requests that could fit multiple categories
+
+    Company context:
+    - TechGadgets Inc. sells electronics and accessories
+    - Order-related queries should go to the Order Agent
+    - Product info and general questions go to the Query Agent
+    
+    For short responses like "yes", "ok", "I want to know more", or numerical answers,
+    treat them as follow-ups and maintain the previous agent selection.
+    """
+    )
     
     # Create query agent
     query_agent = OpenAIAgent(OpenAIAgentOptions(
@@ -80,6 +122,7 @@ async def process_customer_query(query, session_id=None):
             'maxTokens': 800,
             'temperature': 0.5
         },
+        LOG_AGENT_DEBUG_TRACE=True,
         custom_system_prompt={
             'template': '''You are a helpful customer support agent for TechGadgets Inc. 
             Your role is to answer frequently asked questions and provide general information about our products and services.
@@ -106,6 +149,7 @@ async def process_customer_query(query, session_id=None):
         name='Order Agent',
         description='Specializes in order status, modifications, and processing',
         api_key=os.getenv('OPENAI_API_KEY'),
+        LOG_AGENT_DEBUG_TRACE=True,
         model='gpt-4o-mini',
         streaming=True,  # Enable streaming
         inference_config={
