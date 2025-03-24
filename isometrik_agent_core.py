@@ -174,7 +174,7 @@ class IsometrikRetriever(Retriever):
             print(f"Retriever: Sending request to {self.options.endpoint} for agent {self.options.agent_id}")
             response = await asyncio.to_thread(
                 requests.post,
-                self.options.endpoint,  # Use the main endpoint without /retrieve
+                self.options.endpoint,  
                 headers=headers,
                 json=payload
             )
@@ -238,35 +238,41 @@ def create_manager_retriever():
     ))
 
 # Update the agent creation functions to use retrievers
-def create_query_agent():
+def create_query_agent(streaming_handler=None):
     return OpenAIAgent(OpenAIAgentOptions(
         name='Query Agent',
         description='Specializes in answering customer FAQs, general inquiries, and product information',
         api_key=os.getenv('OPENAI_API_KEY'),
         model='gpt-4o-mini',
+        streaming=True if streaming_handler else False,
+        callbacks=streaming_handler,
         retriever=create_query_retriever()
     ))
 
-def create_order_agent(): 
+def create_order_agent(streaming_handler=None):
     return OpenAIAgent(OpenAIAgentOptions(
         name='Order Agent',
         description='Specializes in handling order-related queries, order status, and processing new orders',
         api_key=os.getenv('OPENAI_API_KEY'),
         model='gpt-4o-mini',
+        streaming=True if streaming_handler else False,
+        callbacks=streaming_handler,
         retriever=create_order_retriever()
     ))
 
-def create_manager_agent():
+def create_manager_agent(streaming_handler=None):
     return OpenAIAgent(OpenAIAgentOptions(
         name='Manager Agent',
         description='Specializes in finding toxin-free, eco-friendly solutions for home and personal care',
         api_key=os.getenv('OPENAI_API_KEY'),
         model='gpt-4o-mini',
+        streaming=True if streaming_handler else False,
+        callbacks=streaming_handler,
         retriever=create_manager_retriever()
     ))
 
-def create_orchestrator():
-    """Creates and initializes the orchestrator with all agents with caching."""
+def create_orchestrator(streaming_handler=None):
+    """Creates and initializes the orchestrator with all agents with streaming support."""
     # Initialize the OpenAI classifier for routing requests
     custom_openai_classifier = OpenAIClassifier(OpenAIClassifierOptions(
         api_key=os.getenv('OPENAI_API_KEY'),
@@ -275,11 +281,8 @@ def create_orchestrator():
     
     # Initialize the orchestrator with the classifier
     orchestrator = MultiAgentOrchestrator(options=OrchestratorConfig(
-        LOG_AGENT_CHAT=True,
-        LOG_CLASSIFIER_CHAT=True,
         LOG_CLASSIFIER_OUTPUT=True,
         LOG_CLASSIFIER_RAW_OUTPUT=True,
-        LOG_EXECUTION_TIMES=True,
         MAX_RETRIES=2,
         USE_DEFAULT_AGENT_IF_NONE_IDENTIFIED=True,
         MAX_MESSAGE_PAIRS_PER_AGENT=8,
@@ -288,10 +291,10 @@ def create_orchestrator():
         storage=memory_storage
     )
     
-    # Add all agents
-    query_agent = create_query_agent()
-    order_agent = create_order_agent()
-    manager_agent = create_manager_agent()
+    # Add all agents with streaming support
+    query_agent = create_query_agent(streaming_handler)
+    order_agent = create_order_agent(streaming_handler)
+    manager_agent = create_manager_agent(streaming_handler)
     
     orchestrator.add_agent(query_agent)
     orchestrator.add_agent(order_agent)
@@ -440,38 +443,6 @@ async def main():
         print("\nProcessing your request...")
         response = await chat_session.process_message(user_input)
         print(f"\nAssistant: {response}")
-
-
-# # Example usage as an API
-# class IsometrikAgentAPI:
-#     def __init__(self):
-#         self.sessions = {}
-    
-#     def get_or_create_session(self, session_id: str, user_id: str = None) -> IsometrikChatSession:
-#         """Get an existing session or create a new one."""
-#         if session_id not in self.sessions:
-#             self.sessions[session_id] = IsometrikChatSession()
-#             self.sessions[session_id].set_session_id(session_id)
-#             if user_id:
-#                 self.sessions[session_id].set_user_id(user_id)
-#         return self.sessions[session_id]
-    
-#     async def process_message(self, session_id: str, message: str, user_id: str = None) -> str:
-#         """Process a message for a specific session."""
-#         session = self.get_or_create_session(session_id, user_id)
-#         return await session.process_message(message)
-    
-#     def get_chat_history(self, session_id: str) -> List[Dict[str, str]]:
-#         """Get the chat history for a specific session."""
-#         if session_id in self.sessions:
-#             return self.sessions[session_id].get_chat_history()
-#         return []
-    
-#     def clear_chat_history(self, session_id: str):
-#         """Clear the chat history for a specific session."""
-#         if session_id in self.sessions:
-#             self.sessions[session_id].clear_chat_history()
-
 
 # Run the CLI example if this file is executed directly
 if __name__ == "__main__":
