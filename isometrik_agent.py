@@ -70,12 +70,15 @@ def create_orchestrator():
     orchestrator = MultiAgentOrchestrator(options=OrchestratorConfig(
         LOG_AGENT_CHAT=True,
         LOG_CLASSIFIER_CHAT=True,
+        LOG_CLASSIFIER_OUTPUT=True,
+        LOG_CLASSIFIER_RAW_OUTPUT=True,
+        LOG_EXECUTION_TIMES=True,
         MAX_RETRIES=2,
         USE_DEFAULT_AGENT_IF_NONE_IDENTIFIED=True,
         MAX_MESSAGE_PAIRS_PER_AGENT=8,
         ),
         classifier=custom_openai_classifier,
-        storage=memory_storage
+        storage=memory_storage,
     )
     
     orchestrator.classifier.set_system_prompt(
@@ -188,9 +191,9 @@ class IsometrikAPIAgentWrapper(OpenAIAgent):
 # Function to create the Isometrik API agent
 def create_isometrik_api_agent():
     # API configuration
-    api_url = os.getenv('ISOMETRIK_API_URL')
-    auth_token = os.getenv('ISOMETRIK_AUTH_TOKEN')
-    agent_id = os.getenv('ISOMETRIK_AGENT_ID')
+    api_url = os.getenv('QUERY_AGENT_API_URL')
+    auth_token = os.getenv('QUERY_AGENT_AUTH_TOKEN')
+    agent_id = os.getenv('QUERY_AGENT_ID')
     
     # Create the API agent
     api_agent = IsometrikAPIAgent(api_url, auth_token, agent_id)

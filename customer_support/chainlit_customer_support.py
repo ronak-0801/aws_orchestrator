@@ -151,7 +151,7 @@ def add_user_purchase(user_id, product_id, product_name, quantity, price):
 class ChainlitAgentCallbacks(AgentCallbacks):
     def on_llm_new_token(self, token: str) -> None:
         # Reduced delay for faster response time
-        time.sleep(0.005)  # 5ms delay between tokens - can be adjusted based on user preferences
+        time.sleep(0.05)  # 5ms delay between tokens - can be adjusted based on user preferences
         asyncio.run(cl.user_session.get("current_msg").stream_token(token))
 
 # Orchestrator and agent creation logic with caching
@@ -549,61 +549,61 @@ Thank you for your purchase! You can check your order status anytime.
     
     # Route the request to the appropriate agent
     response = await orchestrator.route_request(message.content, user_id, session_id, {})
-    # Check if the message contains purchase intent - more specific patterns
-    if "buy" in message.content.lower() or "purchase" in message.content.lower() or "get me" in message.content.lower():
-        # Extract product information from the message
-        products = fetch_products()
-        for product_id, product in products.items():
-            product_name = product.get('title', '').lower()
-            if product_name in message.content.lower():
-                # Check if quantity is specified
-                quantity = 1  # Default quantity
+    # # Check if the message contains purchase intent - more specific patterns
+    # if "buy" in message.content.lower() or "purchase" in message.content.lower() or "get me" in message.content.lower():
+    #     # Extract product information from the message
+    #     products = fetch_products()
+    #     for product_id, product in products.items():
+    #         product_name = product.get('title', '').lower()
+    #         if product_name in message.content.lower():
+    #             # Check if quantity is specified
+    #             quantity = 1  # Default quantity
                 
-                # Simplified quantity extraction
-                import re
-                quantity_patterns = [
-                    r'(\d+)\s+' + re.escape(product_name),
-                    r'buy\s+(\d+)',
-                    r'get\s+(\d+)',
-                    r'order\s+(\d+)',
-                    r'purchase\s+(\d+)'
-                ]
+    #             # Simplified quantity extraction
+    #             import re
+    #             quantity_patterns = [
+    #                 r'(\d+)\s+' + re.escape(product_name),
+    #                 r'buy\s+(\d+)',
+    #                 r'get\s+(\d+)',
+    #                 r'order\s+(\d+)',
+    #                 r'purchase\s+(\d+)'
+    #             ]
                 
-                for pattern in quantity_patterns:
-                    quantity_match = re.search(pattern, message.content.lower())
-                    if quantity_match:
-                        try:
-                            quantity = int(quantity_match.group(1))
-                            break
-                        except:
-                            pass
+    #             for pattern in quantity_patterns:
+    #                 quantity_match = re.search(pattern, message.content.lower())
+    #                 if quantity_match:
+    #                     try:
+    #                         quantity = int(quantity_match.group(1))
+    #                         break
+    #                     except:
+    #                         pass
                 
-                # Store the purchase intent for confirmation
-                cl.user_session.set("pending_purchase", {
-                    "product_id": product_id,
-                    "product_name": product.get('title'),
-                    "quantity": quantity,
-                    "price": product.get('price', 0)
-                })
+    #             # Store the purchase intent for confirmation
+    #             cl.user_session.set("pending_purchase", {
+    #                 "product_id": product_id,
+    #                 "product_name": product.get('title'),
+    #                 "quantity": quantity,
+    #                 "price": product.get('price', 0)
+    #             })
                 
-                # Add a confirmation request to the response
-                confirmation_request = f"\n\nI see you want to purchase {quantity} {product.get('title')} at ${product.get('price', 0)} each. Would you like to confirm this purchase? (Say 'yes' to confirm)"
-                await msg.stream_token(confirmation_request)
-                break
+    #             # Add a confirmation request to the response
+    #             confirmation_request = f"\n\nI see you want to purchase {quantity} {product.get('title')} at ${product.get('price', 0)} each. Would you like to confirm this purchase? (Say 'yes' to confirm)"
+    #             await msg.stream_token(confirmation_request)
+    #             break
     
-    # Handle non-streaming responses
-    if isinstance(response, AgentResponse) and response.streaming is False:
-        if isinstance(response.output, str):
-            await msg.stream_token(response.output)
-        elif isinstance(response.output, ConversationMessage):
-            if hasattr(response.output, 'content') and response.output.content:
-                if isinstance(response.output.content, list) and len(response.output.content) > 0:
-                    if isinstance(response.output.content[0], dict) and 'text' in response.output.content[0]:
-                        await msg.stream_token(response.output.content[0]['text'])
-                    else:
-                        await msg.stream_token(str(response.output.content[0]))
-                else:
-                    await msg.stream_token(str(response.output.content))
+    # # Handle non-streaming responses
+    # if isinstance(response, AgentResponse) and response.streaming is False:
+    #     if isinstance(response.output, str):
+    #         await msg.stream_token(response.output)
+    #     elif isinstance(response.output, ConversationMessage):
+    #         if hasattr(response.output, 'content') and response.output.content:
+    #             if isinstance(response.output.content, list) and len(response.output.content) > 0:
+    #                 if isinstance(response.output.content[0], dict) and 'text' in response.output.content[0]:
+    #                     await msg.stream_token(response.output.content[0]['text'])
+    #                 else:
+    #                     await msg.stream_token(str(response.output.content[0]))
+    #             else:
+    #                 await msg.stream_token(str(response.output.content))
     
     # Finalize the message
     await msg.update()
