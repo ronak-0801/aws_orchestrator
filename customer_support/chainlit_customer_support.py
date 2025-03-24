@@ -179,6 +179,9 @@ def create_orchestrator(user_id, force_refresh=False):
     orchestrator = MultiAgentOrchestrator(options=OrchestratorConfig(
         LOG_AGENT_CHAT=True,
         LOG_CLASSIFIER_CHAT=True,
+        LOG_CLASSIFIER_OUTPUT=True,
+        LOG_CLASSIFIER_RAW_OUTPUT=True,
+        LOG_EXECUTION_TIMES=True,
         MAX_RETRIES=2,  # Reduced from 3 to 2
         USE_DEFAULT_AGENT_IF_NONE_IDENTIFIED=True,
         MAX_MESSAGE_PAIRS_PER_AGENT=8,  # Reduced from 10 to 8
@@ -270,7 +273,7 @@ def create_query_agent():
         model='gpt-4o-mini',  # Consider using a faster model if available
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
-        LOG_AGENT_DEBUG_TRACE=False,  # Reduced logging to improve performance
+        LOG_AGENT_DEBUG_TRACE=True,  # Reduced logging to improve performance
         inference_config={
             'maxTokens': 600,  # Reduced from 800
             'temperature': 0.7
@@ -347,7 +350,7 @@ def create_order_agent(user_id):
         model='gpt-4o-mini',
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
-        LOG_AGENT_DEBUG_TRACE=False,  # Reduced logging
+        LOG_AGENT_DEBUG_TRACE=True,  # Reduced logging
         inference_config={
             'maxTokens': 600,  # Reduced from 800
             'temperature': 0.4
@@ -384,7 +387,7 @@ def create_sales_agent(user_id):
     
     # Format product data for the sales agent - select key fields only
     formatted_products = []
-    for product_id, product in list(products.items())[:20]:  # Limit to 20 products
+    for product_id, product in list(products.items())[:50]:  # Limit to 50 products
         formatted_product = {
             'id': product_id,
             'name': product.get('title', f'Product {product_id}'),
@@ -406,7 +409,7 @@ def create_sales_agent(user_id):
         model='gpt-4o-mini',
         streaming=True,
         callbacks=ChainlitAgentCallbacks(),
-        LOG_AGENT_DEBUG_TRACE=False,  # Reduced logging
+        LOG_AGENT_DEBUG_TRACE=True,  # Reduced logging
         inference_config={
             'maxTokens': 600,  # Reduced from 800
             'temperature': 0.5
@@ -424,6 +427,12 @@ def create_sales_agent(user_id):
             
             Customer's previous purchases:
             ''' + purchases_json + '''
+            
+            For product recommendations:
+            - When a customer asks for product recommendations, list up to 15 relevant products
+            - Include product name, price, category, and a brief description
+            - Format recommendations in a clear, readable way
+            - Organize recommendations by category or relevance
             
             For purchase requests:
             - When a customer wants to buy, ask for quantity if not specified
@@ -462,7 +471,7 @@ You're logged in as: demo@user.com (Demo User)
 - What's your return policy?
 - Check my order status
 - Can I change my shipping address?
-- What products do you recommend for gaming?
+- Show me your best laptops
 - I want to cancel my order
 - Show me my recent orders
 - I'm looking to buy a new smartphone
@@ -540,7 +549,6 @@ Thank you for your purchase! You can check your order status anytime.
     
     # Route the request to the appropriate agent
     response = await orchestrator.route_request(message.content, user_id, session_id, {})
-    
     # Check if the message contains purchase intent - more specific patterns
     if "buy" in message.content.lower() or "purchase" in message.content.lower() or "get me" in message.content.lower():
         # Extract product information from the message

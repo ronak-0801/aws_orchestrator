@@ -26,6 +26,38 @@ if 'orchestrator' not in st.session_state:
 
 memory_storage = InMemoryChatStorage()
 
+def create_formatter_agent():
+    """Creates a formatter agent to enhance responses for better readability."""
+    return OpenAIAgent(OpenAIAgentOptions(
+        name='Response Formatter Agent',
+        description='Specializes in formatting responses to be more readable and engaging using proper markdown',
+        api_key=os.getenv('OPENAI_API_KEY'),
+        model='gpt-4o-mini',
+        streaming=False,
+        LOG_AGENT_DEBUG_TRACE=True,
+        custom_system_prompt={
+            'template': '''You are a response formatter for customer service interactions. Your job is to:
+            
+            1. Format raw responses to be more readable and engaging
+            2. Organize information with proper markdown formatting (headers, bullet points, etc.)
+            3. Highlight key information like prices, product features, or policy details
+            4. Ensure any links are properly formatted and accessible
+            5. Maintain all factual information from the original response
+            6. Keep the tone friendly and helpful
+            
+            Do not add any fictional information not present in the original response.
+            
+            When formatting:
+            - Use markdown headers (# and ##) for main sections
+            - Use bullet points for lists of features or options
+            - Bold important information like prices or key details
+            - Create tables when comparing multiple products or options
+            - Format code snippets or technical information in code blocks
+            - Ensure proper spacing for readability
+            '''
+        }
+    ))
+
 def create_orchestrator():
     """Creates and initializes the orchestrator with all agents with caching."""
     # Initialize the OpenAI classifier for routing requests
@@ -71,6 +103,11 @@ def create_orchestrator():
         - Order-related queries go to the Order Agent
         - Product info and general questions go to the Isometrik API Agent
         - Purchase-related queries go to the Sales Agent
+        - Responses that need formatting or better presentation go to the Response Formatter Agent
+        
+        Special routing rules:
+        1. If a response from the Isometrik API Agent needs formatting, route it to the Response Formatter Agent
+        2. For raw data or complex information, always use the Response Formatter Agent after getting the initial response
         
         For short responses like "yes", "ok", "I want to know more", or numerical answers,
         treat them as follow-ups and maintain the previous agent selection.
@@ -79,8 +116,10 @@ def create_orchestrator():
     
     # Add agents to the orchestrator
     orchestrator.add_agent(create_isometrik_api_agent())
+    orchestrator.add_agent(create_formatter_agent())
     
     return orchestrator
+
 
 # Create Isometrik API agent
 class IsometrikAPIAgent:
@@ -112,20 +151,11 @@ class IsometrikAPIAgent:
                 headers=headers,
                 json=payload
             )
-            
             if response.status_code == 200:
                 data = response.json()
-                # Parse the nested JSON structure
-                if isinstance(data, dict) and 'text' in data:
-                    try:
-                        # Parse the inner JSON string
-                        inner_data = json.loads(data['text'])
-                        if isinstance(inner_data, dict) and 'text' in inner_data:
-                            return inner_data['text']
-                        return data['text']
-                    except json.JSONDecodeError:
-                        return data['text']
-                return str(data)
+                
+                inner_data = json.loads(data['text'])
+                return inner_data
             else:
                 error_text = response.text
                 print(f"API Error: {response.status_code} - {error_text}")
@@ -147,6 +177,11 @@ class IsometrikAPIAgentWrapper(OpenAIAgent):
         response = await self.api_agent.process_request(message, user_id, session_id, metadata)
         
         # Create a response object compatible with the orchestrator
+        # return AgentResponse(
+        #     output=response,
+        #     streaming=False,
+        #     metadata=metadata
+        # )
         return response
 
 # Function to create the Isometrik API agent
@@ -168,10 +203,6 @@ def create_isometrik_api_agent():
         streaming=False,  # API responses can't be streamed
         callbacks=None,  # No callbacks needed for API agent
         LOG_AGENT_DEBUG_TRACE=True,  # Enable logging for debugging
-        inference_config={
-            'maxTokens': 600,
-            'temperature': 0.7
-        }
     ))
 
 # Streamlit UI
@@ -186,7 +217,7 @@ if st.session_state.orchestrator is None:
 # Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.write(message["content"])
+        st.markdown(message["content"])  # Use markdown to render links
 
 # Chat input
 if prompt := st.chat_input("What would you like to know?"):
@@ -203,21 +234,28 @@ if prompt := st.chat_input("What would you like to know?"):
         
         # Process the request
         async def process_and_display():
-            response = await st.session_state.orchestrator.route_request(
-                prompt, 
-                st.session_state.user_id, 
-                st.session_state.session_id
-            )
-            
-            # Extract the response text
-
-            response_text = str(response.output)
+            try:
+                response = await st.session_state.orchestrator.route_request(
+                    prompt, 
+                    st.session_state.user_id, 
+                    st.session_state.session_id
+                )
+                # Extract the response text
+                if isinstance(response, AgentResponse):
+                    response_text = response.output
+                else:
+                    response_text = str(response)
+                    
+                # Update the placeholder with the response
+                message_placeholder.markdown(response_text)  # Use markdown to render links
                 
-            # Update the placeholder with the response
-            message_placeholder.write(response_text)
-            
-            # Add assistant response to chat history
-            st.session_state.messages.append({"role": "assistant", "content": response_text})
+                # Add assistant response to chat history
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+            except Exception as e:
+                error_message = f"Error processing request: {str(e)}"
+                print(error_message)
+                message_placeholder.write(error_message)
+                st.session_state.messages.append({"role": "assistant", "content": error_message})
         
         # Run the async function
         asyncio.run(process_and_display())
@@ -233,6 +271,7 @@ with st.sidebar:
     st.write("- Tell me about your smartphones")
     st.write("- What's your return policy?")
     st.write("- Do you have gaming laptops?")
+    st.write("- Show me some facewash products")
     
     # Add a button to clear the chat history
     if st.button("Clear Chat History"):
