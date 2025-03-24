@@ -4,6 +4,7 @@ import requests
 import streamlit as st
 import json
 from dotenv import load_dotenv
+import openai
 
 from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions, AgentCallbacks, AgentResponse
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator, OrchestratorConfig
@@ -205,6 +206,37 @@ def create_isometrik_api_agent():
         LOG_AGENT_DEBUG_TRACE=True,  # Enable logging for debugging
     ))
 
+# Move the function definition before it's used
+async def format_response_with_openai(user_query, response_text):
+    """Format the response using OpenAI to make it more readable and engaging."""
+    try:
+        client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        completion = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-4o-mini",  # You can use a smaller model for formatting
+            messages=[
+                {"role": "system", "content": """You are a response formatter. Your job is to:
+                1. Format the AI response to be more readable and engaging
+                2. Use proper markdown formatting (headers, bullet points, etc.)
+                3. Highlight key information
+                4. Ensure any links are properly formatted
+                5. Maintain all factual information from the original response
+                6. Keep the tone friendly and helpful
+                
+                Do not add any fictional information not present in the original response."""},
+                {"role": "user", "content": f"User query: {user_query}\n\nOriginal response: {response_text}\n\nPlease format this response to be more readable and engaging using proper markdown."}
+            ],
+            temperature=0.3,  # Lower temperature for more consistent formatting
+        )
+        
+        formatted_response = completion.choices[0].message.content
+        return formatted_response
+    except Exception as e:
+        print(f"Error formatting response: {str(e)}")
+        # Return the original response if formatting fails
+        return response_text
+
 # Streamlit UI
 st.title("Isometrik Agent Chat")
 st.subheader("Ask questions about TechGadgets products and services")
@@ -245,12 +277,15 @@ if prompt := st.chat_input("What would you like to know?"):
                     response_text = response.output
                 else:
                     response_text = str(response)
-                    
-                # Update the placeholder with the response
-                message_placeholder.markdown(response_text)  # Use markdown to render links
+                
+                # Format the response using OpenAI
+                formatted_response = await format_response_with_openai(prompt, response_text)
+                
+                # Update the placeholder with the formatted response
+                message_placeholder.markdown(formatted_response)  # Use markdown to render links
                 
                 # Add assistant response to chat history
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                st.session_state.messages.append({"role": "assistant", "content": formatted_response})
             except Exception as e:
                 error_message = f"Error processing request: {str(e)}"
                 print(error_message)
