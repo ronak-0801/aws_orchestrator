@@ -106,11 +106,25 @@ def create_order_retriever():
         agent_id=os.getenv('ORDER_AGENT_ID')
     ))
 
-def create_manager_retriever():
+def create_ecom_manager_retriever():
     return IsometrikRetriever(IsometrikRetrieverOptions(
         endpoint=os.getenv('MANAGER_AGENT_API_URL'),
         auth_token=os.getenv('MANAGER_AGENT_AUTH_TOKEN'),
         agent_id=os.getenv('MANAGER_AGENT_ID')
+    ))
+
+def create_subscription_retriever():
+    return IsometrikRetriever(IsometrikRetrieverOptions(
+        endpoint=os.getenv('SUBSCRIPTION_AGENT_API_URL'),
+        auth_token=os.getenv('SUBSCRIPTION_AGENT_AUTH_TOKEN'),
+        agent_id=os.getenv('SUBSCRIPTION_AGENT_ID')
+    ))
+    
+def create_product_retriever():
+    return IsometrikRetriever(IsometrikRetrieverOptions(
+        endpoint=os.getenv('PRODUCT_AGENT_API_URL'),
+        auth_token=os.getenv('PRODUCT_AGENT_AUTH_TOKEN'),
+        agent_id=os.getenv('PRODUCT_AGENT_ID')
     ))
 
 # Update the agent creation functions to use retrievers
@@ -144,7 +158,29 @@ def create_manager_agent(streaming_handler=None):
         model='gpt-4o-mini',
         streaming=True if streaming_handler else False,
         callbacks=streaming_handler,
-        retriever=create_manager_retriever()
+        retriever=create_ecom_manager_retriever()
+    ))
+
+def create_subscription_agent(streaming_handler=None):
+    return OpenAIAgent(OpenAIAgentOptions(
+        name='Subscription Agent',
+        description='Specializes in handling subscription-related queries',
+        api_key=os.getenv('OPENAI_API_KEY'),
+        model='gpt-4o-mini',
+        streaming=True if streaming_handler else False,
+        callbacks=streaming_handler,
+        retriever=create_subscription_retriever()
+    ))
+
+def create_product_agent(streaming_handler=None):
+    return OpenAIAgent(OpenAIAgentOptions(
+        name='Product Agent',
+        description='Specializes in providing detailed product information including ingredients, usage instructions, benefits, and specifications',
+        api_key=os.getenv('OPENAI_API_KEY'),
+        model='gpt-4o-mini',
+        streaming=True if streaming_handler else False,
+        callbacks=streaming_handler,    
+        retriever=create_product_retriever()
     ))
 
 def create_orchestrator(streaming_handler=None):
@@ -171,10 +207,14 @@ def create_orchestrator(streaming_handler=None):
     query_agent = create_query_agent(streaming_handler)
     order_agent = create_order_agent(streaming_handler)
     manager_agent = create_manager_agent(streaming_handler)
+    subscription_agent = create_subscription_agent(streaming_handler)
+    product_agent = create_product_agent(streaming_handler)
     
     orchestrator.add_agent(query_agent)
     orchestrator.add_agent(order_agent)
     orchestrator.add_agent(manager_agent)
+    orchestrator.add_agent(subscription_agent)
+    orchestrator.add_agent(product_agent)
     
     # Update the classifier prompt following Anthropic's best practices
     orchestrator.classifier.set_system_prompt(
@@ -200,6 +240,8 @@ def create_orchestrator(streaming_handler=None):
            - Query Agent: General product information, FAQs, and basic inquiries
            - Order Agent: Order status, tracking, processing, and shipping
            - Manager Agent: Eco-friendly products, toxin-free solutions, sustainable living
+           - Subscription Agent: Subscription-related queries
+           - Product Agent: Detailed product information including ingredients, usage instructions, benefits, and specifications
 
         2. Priority: Assign based on urgency and impact.
            - High: Issues affecting service, urgent requests
