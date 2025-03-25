@@ -3,14 +3,13 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
-from typing import List, Dict, Optional, AsyncIterable, Any
-from dataclasses import dataclass, field
+from typing import List, Dict, Any
 
 from multi_agent_orchestrator.agents import OpenAIAgent, OpenAIAgentOptions, AgentCallbacks, AgentResponse, Agent, AgentOptions
 from multi_agent_orchestrator.orchestrator import MultiAgentOrchestrator, OrchestratorConfig
 from multi_agent_orchestrator.classifiers import OpenAIClassifier, OpenAIClassifierOptions
 from multi_agent_orchestrator.storage import InMemoryChatStorage
-from multi_agent_orchestrator.types import ConversationMessage, ParticipantRole
+from multi_agent_orchestrator.types import ConversationMessage
 from multi_agent_orchestrator.retrievers import Retriever
 
 # Load environment variables
@@ -20,129 +19,6 @@ load_dotenv()
 memory_storage = InMemoryChatStorage()
 
 # Custom options class for Isometrik Agent
-class IsometrikAgentOptions(AgentOptions):
-    def __init__(
-        self,
-        name: str,
-        description: str,
-        endpoint: str,
-        auth_token: str,
-        agent_id: str,
-        method: str = "POST",
-        streaming: bool = False,
-        headers_callback: Optional[callable] = None,
-        input_payload_encoder: Optional[callable] = None,
-        output_payload_decoder: Optional[callable] = None
-    ):
-        super().__init__(name=name, description=description)
-        self.endpoint = endpoint
-        self.auth_token = auth_token
-        self.agent_id = agent_id
-        self.method = method
-        self.streaming = streaming
-        self.headers_callback = headers_callback
-        self.input_payload_encoder = input_payload_encoder
-        self.output_payload_decoder = output_payload_decoder
-
-# Custom Isometrik Agent implementation
-class IsometrikAgent(Agent):
-    def __init__(self, options: IsometrikAgentOptions):
-        super().__init__(options)
-        self.options = options
-        self.options.input_payload_encoder = options.input_payload_encoder or self.default_input_payload_encoder
-        self.options.output_payload_decoder = options.output_payload_decoder or self.default_output_payload_decoder
-        
-        if not all([self.options.endpoint, self.options.auth_token, self.options.agent_id]):
-            raise ValueError("Missing required API configuration parameters")
-
-    @staticmethod
-    def default_input_payload_encoder(input_text: str, chat_history: List[ConversationMessage],
-                                     user_id: str, session_id: str,
-                                     additional_params: Optional[Dict[str, str]] = None) -> Dict:
-        """Default encoder for the input payload."""
-        return {
-            "session_id": session_id,
-            "message": input_text,
-            "agent_id": additional_params.get("agent_id") if additional_params else None
-        }
-
-    @staticmethod
-    def default_output_payload_decoder(response: Any) -> Any:
-        """Default decoder for the output payload."""
-        if isinstance(response, str):
-            try:
-                data = json.loads(response)
-                if 'text' in data:
-                    inner_data = json.loads(data['text'])
-                    return inner_data
-                return data
-            except json.JSONDecodeError:
-                return response
-        return response
-
-    def get_headers(self) -> Dict[str, str]:
-        """Get headers for the API request."""
-        default_headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.options.auth_token}'
-        }
-        if self.options.headers_callback:
-            return {**default_headers, **self.options.headers_callback()}
-        return default_headers
-
-    async def fetch(self, payload: Any) -> Any:
-        """Fetch data from the API."""
-        headers = self.get_headers()
-        
-        try:
-            print(f"Sending request to {self.options.endpoint} with payload: {payload}")
-            # Run requests.post in a separate thread using asyncio.to_thread
-            response = await asyncio.to_thread(
-                requests.request,
-                self.options.method,
-                self.options.endpoint,
-                headers=headers,
-                json=payload
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"HTTP error! status: {response.status_code} - {response.text}")
-            
-            content = response.text
-            print(f"Raw API response: {content}")
-            decoded = self.options.output_payload_decoder(content)
-            print(f"Decoded response: {decoded}")
-            return decoded
-        except Exception as e:
-            error_message = f"Exception in API call: {str(e)}"
-            print(error_message)
-            return f"Sorry, I couldn't connect to our knowledge base at the moment. Please try again later."
-
-    async def process_request(
-        self,
-        input_text: str,
-        user_id: str,
-        session_id: str,
-        chat_history: List[ConversationMessage],
-        additional_params: Optional[Dict[str, Any]] = None
-    ) -> ConversationMessage:
-        """Process a request by sending it to the Isometrik API."""
-        # Add agent_id to additional_params
-        if additional_params is None:
-            additional_params = {}
-        additional_params["agent_id"] = self.options.agent_id
-        
-        # Encode the payload
-        payload = self.options.input_payload_encoder(input_text, chat_history, user_id, session_id, additional_params)
-        
-        # Fetch the response
-        result = await self.fetch(payload)
-        
-        # Return a proper ConversationMessage
-        return ConversationMessage(
-            role=ParticipantRole.ASSISTANT.value,
-            content=[{"text": result}]
-        )
 
 class IsometrikRetrieverOptions:
     def __init__(self, endpoint: str, auth_token: str, agent_id: str):

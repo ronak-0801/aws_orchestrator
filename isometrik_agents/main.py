@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import AsyncIterable
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,9 +7,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, List, Any
 
-from isometrik_agent_core import create_orchestrator
-from multi_agent_orchestrator.agents import AgentResponse, AgentCallbacks
+from .isometrik_agent_core import create_orchestrator
 from multi_agent_orchestrator.types import ConversationMessage
+from multi_agent_orchestrator.agents import AgentResponse, AgentCallbacks
 
 app = FastAPI()
 
@@ -32,6 +33,7 @@ class StreamingHandler(AgentCallbacks):
         print("Streaming handler initialized")
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
+        time.sleep(0.5)
         print(token, end="", flush=True) 
         # Print tokens to console in real-time
 
@@ -42,7 +44,9 @@ class StreamingHandler(AgentCallbacks):
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         print("\nGeneration concluded")
 
-@app.post("/chat/")
+
+
+@app.post("/stream_chat/")
 async def chat(body: ChatRequest):
     try:
         # Create a streaming handler
