@@ -8,15 +8,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
-
+from threading import Thread
 from .isometrik_agent_core import create_orchestrator
 from multi_agent_orchestrator.types import ConversationMessage
 from multi_agent_orchestrator.agents import AgentCallbacks, AgentResponse
 
-# Create FastAPI app
 app = FastAPI()
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,120 +28,83 @@ class ChatRequest(BaseModel):
     user_id: str
     session_id: str
 
-class AsyncStreamingHandler(AgentCallbacks):
-    def __init__(self):
+
+
+class MyCustomHandler(AgentCallbacks):
+    def __init__(self, queue) -> None:
         super().__init__()
-        self.token_queue = asyncio.Queue()
-        self.stream_complete = asyncio.Event()
-        self.error_event = asyncio.Event()
-        self.error_message = None
+        self._queue = queue
+        self._stop_signal = None
+        print("Custom handler Initialized")
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
-        """Add each new token to the async queue"""
-        time.sleep(0.5)
-        self.token_queue.put_nowait(token)
-        print(token, end="", flush=True)  # Print to console for debugging
+        time.sleep(0.05)
+        self._queue.put_nowait(token)
+        print(token, end="", flush=True)
 
     def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any) -> None:
-        """Reset events when generation starts"""
-        print("\nGeneration started")
-        self.stream_complete.clear()
-        self.error_event.clear()
+        print("generation started")
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
-        """Signal stream completion"""
-        print("\nGeneration concluded")
-        self.token_queue.put_nowait(None)  # Sentinel value
-        self.stream_complete.set()
+        print("\n\ngeneration concluded")
+        print("LLM generation complete")
 
-    async def stream_tokens(self) -> AsyncIterable[str]:
-        """
-        Async generator to stream tokens with proper event handling
-        """
+
+def setup_orchestrator(streamer_queue):
+    streaming_handler = MyCustomHandler(streamer_queue)
+    orchestrator = create_orchestrator(streaming_handler=streaming_handler)
+    
+    return orchestrator
+
+
+async def start_generation(query, user_id, session_id, streamer_queue):
+    try:
+        orchestrator = setup_orchestrator(streamer_queue)
+
+        response = await orchestrator.route_request(query, user_id, session_id)
+        if isinstance(response, AgentResponse) and response.streaming is False:
+            if isinstance(response.output, str):
+                streamer_queue.put_nowait(response.output)
+            elif isinstance(response.output, ConversationMessage):
+                streamer_queue.put_nowait(response.output.content[0].get('text'))
+    except Exception as e:
+        print(f"Error in start_generation: {e}")
+    finally:
+        streamer_queue.put_nowait(None)  
+
+async def response_generator(query, user_id, session_id):
+    streamer_queue = asyncio.Queue()
+
+    Thread(target=lambda: asyncio.run(start_generation(query, user_id, session_id, streamer_queue))).start()
+
+    print("Waiting for the response...")
+    while True:
         try:
-            while not self.stream_complete.is_set():
-                # Wait for next token with timeout
-                try:
-                    token = await asyncio.wait_for(self.token_queue.get(), timeout=10.0)
-                    
-                    # Check for stream end sentinel
-                    if token is None:
-                        break
-                    
-                    # Yield each token
-                    yield token
-                    
-                    # Mark task as done
-                    self.token_queue.task_done()
+            try:
+                value = await asyncio.wait_for(streamer_queue.get(), 0.1)
                 
-                except asyncio.TimeoutError:
-                    # Handle potential streaming timeout
-                    print("Token timeout reached")
+                if value is None:
+                    yield f"data: [DONE]\n\n"
                     break
-            
-            # Check if an error occurred
-            if self.error_event.is_set():
-                raise RuntimeError(self.error_message or "Unknown streaming error")
-        
+                
+                yield f"data: {value}\n\n"
+                
+                streamer_queue.task_done()
+            except asyncio.TimeoutError:
+                continue
         except Exception as e:
-            print(f"Error in stream_tokens: {str(e)}")
-            yield f"Error: {str(e)}"
-        finally:
-            # Ensure stream is marked as complete
-            self.stream_complete.set()
+            print(f"Error in response_generator: {str(e)}")
+            yield f"data: Error: {str(e)}\n\n"
+            break
 
-async def error_event_generator(error_message: str):
-    """Generate error events for streaming"""
-    yield f"event: error\ndata: {error_message}\n\n"
 
 @app.post("/stream_chat/")
-async def stream_chat(request: Request, body: ChatRequest):
-    """
-    Streaming chat endpoint with robust error handling
-    """
-    try:
-        # Create streaming handler
-        streaming_handler = AsyncStreamingHandler()
-        
-        # Create orchestrator with streaming handler
-        orchestrator = create_orchestrator(streaming_handler=streaming_handler)
-        
-        # Process request asynchronously
-        asyncio.create_task(
-            orchestrator.route_request(
-                body.content, 
-                body.user_id, 
-                body.session_id
-            )
-        )
-        
-        # Create SSE streaming response
-        async def event_generator():
-            # Send start event
-            yield "event: start\ndata: Streaming initiated\n\n"
-            
-            try:
-                # Stream tokens
-                async for token in streaming_handler.stream_tokens():
-                    # Properly escape token for SSE
-                    escaped_token = token.replace("\n", "\\n") if isinstance(token, str) else str(token)
-                    yield f"event: token\ndata: {escaped_token}\n\n"
-                
-                # Send completion event
-                yield "event: end\ndata: Stream completed\n\n"
-            
-            except Exception as e:
-                print(f"Error in event_generator: {str(e)}")
-                # Error event
-                yield f"event: error\ndata: {str(e)}\n\n"
-        
-        return StreamingResponse(
-            event_generator(), 
-            media_type="text/event-stream",
-        )
-    
-    except Exception as e:
-        print(f"Error in stream_chat endpoint: {str(e)}")
+async def stream_chat(body: ChatRequest):
+    return StreamingResponse(
+        response_generator(body.content, body.user_id, body.session_id), 
+        media_type="text/event-stream"
+    )
+
 
 
 @app.get("/health")

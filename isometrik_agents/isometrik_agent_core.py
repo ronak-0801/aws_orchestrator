@@ -47,7 +47,6 @@ class IsometrikRetriever(Retriever):
                 "agent_id": self.options.agent_id
             }
             
-            print(f"Retriever: Sending request to {self.options.endpoint} for agent {self.options.agent_id}")
             response = await asyncio.to_thread(
                 requests.post,
                 self.options.endpoint,  
@@ -78,7 +77,6 @@ class IsometrikRetriever(Retriever):
         try:
             results = await self.retrieve(text)
             combined = "\n".join(str(result.get('content', '')) for result in results)
-            print(f"Retriever: Combined {len(results)} results")
             return combined
         except Exception as e:
             print(f"Retriever combine error: {str(e)}")
