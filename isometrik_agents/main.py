@@ -84,7 +84,6 @@ async def response_generator(query, user_id, session_id):
                 value = await asyncio.wait_for(streamer_queue.get(), 0.1)
                 
                 if value is None:
-                    yield f"data: [DONE]\n\n"
                     break
                 
                 yield f"data: {value}\n\n"

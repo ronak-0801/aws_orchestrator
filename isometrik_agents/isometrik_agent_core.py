@@ -33,7 +33,10 @@ class IsometrikRetriever(Retriever):
         
         if not all([options.endpoint, options.auth_token, options.agent_id]):
             raise ValueError("endpoint, auth_token, and agent_id are required in options")
-        
+    
+    async def retrieve_and_generate(self, text, retrieve_and_generate_configuration=None):
+        pass
+
     async def retrieve(self, text: str) -> List[Dict[str, Any]]:
         try:
             headers = {
@@ -60,34 +63,23 @@ class IsometrikRetriever(Retriever):
             
             # Parse the response according to your API's format
             content = response.text
-            try:
-                data = json.loads(content)
-                if 'text' in data:
-                    inner_data = json.loads(data['text'])
-                    return [{"content": inner_data}]
-                return [{"content": data}]
-            except json.JSONDecodeError:
-                return [{"content": content}]
+            data = json.loads(content)
+            return data
             
         except Exception as e:
             print(f"Retriever error: {str(e)}")
             raise Exception(f"Failed to retrieve: {str(e)}")
 
-    async def retrieve_and_combine_results(self, text: str) -> str:
-        try:
-            results = await self.retrieve(text)
-            combined = "\n".join(str(result.get('content', '')) for result in results)
-            return combined
-        except Exception as e:
-            print(f"Retriever combine error: {str(e)}")
-            raise Exception(f"Failed to retrieve and combine results: {str(e)}")
+    async def retrieve_and_combine_results(self, text: str) -> Dict[str, Any]:
 
-    async def retrieve_and_generate(self, text: str) -> str:
-        try:
-            return await self.retrieve_and_combine_results(text)
-        except Exception as e:
-            print(f"Retriever generate error: {str(e)}")
-            raise Exception(f"Failed to retrieve and generate: {str(e)}")
+        results = await self.retrieve(text)
+        
+        return self._combine_results(results)
+
+    @staticmethod
+    def _combine_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+        return results['text']
 
 # Create retriever instances for each agent
 def create_query_retriever():
@@ -134,7 +126,16 @@ def create_query_agent(streaming_handler=None):
         model='gpt-4o-mini',
         streaming=True if streaming_handler else False,
         callbacks=streaming_handler,
-        retriever=create_query_retriever()
+        retriever=create_query_retriever(),
+        custom_system_prompt={
+            'template': """CRITICAL: You are a JSON pass-through agent.
+Your only task is to return the exact JSON context provided, with zero modifications.
+Do not add text, do not modify structure, do not format.
+Return the raw JSON exactly as received.
+
+{{context}}""",
+            'variables': {}
+        }
     ))
 
 def create_order_agent(streaming_handler=None):
@@ -145,7 +146,16 @@ def create_order_agent(streaming_handler=None):
         model='gpt-4o-mini',
         streaming=True if streaming_handler else False,
         callbacks=streaming_handler,
-        retriever=create_order_retriever()
+        retriever=create_order_retriever(),
+        custom_system_prompt={
+            'template': """CRITICAL: You are a JSON pass-through agent.
+Your only task is to return the exact JSON context provided, with zero modifications.
+Do not add text, do not modify structure, do not format.
+Return the raw JSON exactly as received.
+
+{{context}}""",
+            'variables': {}
+        }
     ))
 
 def create_manager_agent(streaming_handler=None):
@@ -156,7 +166,16 @@ def create_manager_agent(streaming_handler=None):
         model='gpt-4o-mini',
         streaming=True if streaming_handler else False,
         callbacks=streaming_handler,
-        retriever=create_ecom_manager_retriever()
+        retriever=create_ecom_manager_retriever(),
+        custom_system_prompt={
+            'template': """CRITICAL: You are a JSON pass-through agent.
+Your only task is to return the exact JSON context provided, with zero modifications.
+Do not add text, do not modify structure, do not format.
+Return the raw JSON exactly as received.
+
+{{context}}""",
+            'variables': {}
+        }
     ))
 
 def create_subscription_agent(streaming_handler=None):
@@ -235,7 +254,7 @@ def create_orchestrator(streaming_handler=None):
         Guidelines for classification:
 
         1. Agent Type: Choose the most appropriate agent based on the nature of the query.
-           - Query Agent: General product information, FAQs, and basic inquiries
+           - Query Agent: General product information including ingredients, FAQs, and basic inquiries
            - Order Agent: Order status, tracking, processing, and shipping
            - Manager Agent: Eco-friendly products, toxin-free solutions, sustainable living
            - Subscription Agent: Subscription-related queries
@@ -294,7 +313,6 @@ class IsometrikChatSession:
             # Add user message to chat history
             self.messages.append({"role": "user", "content": message})
             
-            # Process the request with the Isometrik API Agent first
             print(f"Routing request to orchestrator: {message}")
             response = await self.orchestrator.route_request(
                 message, 

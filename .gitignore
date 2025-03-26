@@ -179,3 +179,4 @@ cython_debug/
 dummy.py
 .files/
 chainlit.md
+simple_agent_demo.py
