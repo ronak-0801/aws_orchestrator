@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from typing import AsyncIterable, Dict, Any, List
+import re
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -62,18 +63,29 @@ async def start_generation(query, user_id, session_id, streamer_queue):
         orchestrator = setup_orchestrator(streamer_queue)
 
         response = await orchestrator.route_request(query, user_id, session_id)
-        if isinstance(response, AgentResponse) and response.streaming is False:
-            if isinstance(response.output, str):
-                streamer_queue.put_nowait(response.output)
-            elif isinstance(response.output, ConversationMessage):
-                streamer_queue.put_nowait(response.output.content[0].get('text'))
+        # if isinstance(response, AgentResponse) and response.streaming is False:
+        #     if isinstance(response.output, str):
+        #         streamer_queue.put_nowait(response.output)
+        #     elif isinstance(response.output, ConversationMessage):
+        #         streamer_queue.put_nowait(response.output.content[0].get('text'))
+        # print(response.output.content[0].get('text'))
     except Exception as e:
         print(f"Error in start_generation: {e}")
     finally:
         streamer_queue.put_nowait(None)  
 
 async def response_generator(query, user_id, session_id):
+    widget =                             {
+                                "widgetId": 1,
+                                "widgets_type": 1,
+                                "type": "options",
+                                "widget": ""
+                            }
+                        
     streamer_queue = asyncio.Queue()
+    options_list = []
+    collecting_options = False
+    start_stream = False
 
     Thread(target=lambda: asyncio.run(start_generation(query, user_id, session_id, streamer_queue))).start()
 
@@ -83,10 +95,33 @@ async def response_generator(query, user_id, session_id):
             try:
                 value = await asyncio.wait_for(streamer_queue.get(), 0.1)
                 
-                if value is None:
+                if value == "options":
+                    collecting_options = True
+                    continue
+                elif value is None:
+                    # Join all collected tokens and extract options using regex
+                    options_text = ''.join(options_list)
+                    # Extract everything between [ and ]
+                    matches = re.search(r'\[(.*?)\]', options_text)
+                    if matches:
+                        # Split by commas and clean up each option
+                        options = [
+                            opt.strip().strip('"').strip()
+                            for opt in matches.group(1).split(',')
+                        ]
+                        widget["widget"] = options
+                        yield f"data: {widget}\n\n"
                     break
                 
-                yield f"data: {value}\n\n"
+                if collecting_options:
+                    options_list.append(value)
+                else:
+                    if value == '":':
+                        start_stream = True
+                        continue
+                    if start_stream:
+                        print(value, end="", flush=True)
+                        yield f"data: {value}\n\n"
                 
                 streamer_queue.task_done()
             except asyncio.TimeoutError:
@@ -95,6 +130,8 @@ async def response_generator(query, user_id, session_id):
             print(f"Error in response_generator: {str(e)}")
             yield f"data: Error: {str(e)}\n\n"
             break
+    
+
 
 
 @app.post("/stream_chat/")
