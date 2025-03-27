@@ -1,18 +1,15 @@
 import asyncio
-import json
 import time
-from typing import AsyncIterable, Dict, Any, List
+from typing import  Dict, Any, List
 import re
-
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from threading import Thread
-from .isometrik_agent_core import create_orchestrator
-from multi_agent_orchestrator.types import ConversationMessage
-from multi_agent_orchestrator.agents import AgentCallbacks, AgentResponse
+from .isometrik_orchestrator import create_orchestrator
+from multi_agent_orchestrator.agents import AgentCallbacks
 
 app = FastAPI()
 
@@ -99,12 +96,9 @@ async def response_generator(query, user_id, session_id):
                     collecting_options = True
                     continue
                 elif value is None:
-                    # Join all collected tokens and extract options using regex
                     options_text = ''.join(options_list)
-                    # Extract everything between [ and ]
                     matches = re.search(r'\[(.*?)\]', options_text)
                     if matches:
-                        # Split by commas and clean up each option
                         options = [
                             opt.strip().strip('"').strip()
                             for opt in matches.group(1).split(',')
