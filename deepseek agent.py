@@ -10,7 +10,6 @@ from multi_agent_orchestrator.classifiers import OpenAIClassifier, OpenAIClassif
 
 class DeepSeekAgentOptions(AgentOptions):
     """Configuration options for the DeepSeek Agent."""
-    # api_key: str = "sk-854a75b31f744899af227aa6d92f158f"
     # model: str = Field(default="deepseek-chat")  # Default model - uses DeepSeek-V3
     # api_base: str = Field(default="https://api.deepseek.com")  # Base URL without v1 suffix
     # temperature: float = Field(default=0.7)
