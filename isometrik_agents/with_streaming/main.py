@@ -4,12 +4,12 @@ from typing import  Dict, Any, List
 import re
 import uvicorn
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from threading import Thread
 from .isometrik_orchestrator import create_orchestrator
-from multi_agent_orchestrator.agents import AgentCallbacks
+from multi_agent_orchestrator.agents import AgentCallbacks, AgentStreamResponse
 
 app = FastAPI()
 
@@ -48,82 +48,84 @@ class MyCustomHandler(AgentCallbacks):
         print("LLM generation complete")
 
 
-def setup_orchestrator(streamer_queue):
-    streaming_handler = MyCustomHandler(streamer_queue)
-    orchestrator = create_orchestrator(streaming_handler=streaming_handler)
+def setup_orchestrator():
+    # streaming_handler = MyCustomHandler(streamer_queue)
+    orchestrator = create_orchestrator()
     
     return orchestrator
 
 
-async def start_generation(query, user_id, session_id, streamer_queue):
+async def start_generation(query, user_id, session_id):
     try:
-        orchestrator = setup_orchestrator(streamer_queue)
+        orchestrator = setup_orchestrator()
 
-        response = await orchestrator.route_request(query, user_id, session_id)
-        # if isinstance(response, AgentResponse) and response.streaming is False:
-        #     if isinstance(response.output, str):
-        #         streamer_queue.put_nowait(response.output)
-        #     elif isinstance(response.output, ConversationMessage):
-        #         streamer_queue.put_nowait(response.output.content[0].get('text'))
-        # print(response.output.content[0].get('text'))
+        response = await orchestrator.route_request(query, user_id, session_id,None,stream_response=True)
+
+        if response.streaming:
+            async for chunk in response.output:
+                if isinstance(chunk, AgentStreamResponse):
+                    print(chunk.text, flush=True, end="")
+                    yield f"data: {chunk.text}\n\n"
+
     except Exception as e:
         print(f"Error in start_generation: {e}")
-    finally:
-        streamer_queue.put_nowait(None)  
 
-async def response_generator(query, user_id, session_id):
-    widget =                             {
-                                "widgetId": 1,
-                                "widgets_type": 1,
-                                "type": "options",
-                                "widget": ""
-                            }
+    # finally:
+    #     streamer_queue.put_nowait(None)  
+
+# async def response_generator(query, user_id, session_id):
+#     widget =                             {
+#                                 "widgetId": 1,
+#                                 "widgets_type": 1,
+#                                 "type": "options",
+#                                 "widget": ""
+#                             }
                         
-    streamer_queue = asyncio.Queue()
-    options_list = []
-    collecting_options = False
-    start_stream = False
+#     streamer_queue = asyncio.Queue()
+#     options_list = []
+#     collecting_options = False
+#     start_stream = False
 
-    Thread(target=lambda: asyncio.run(start_generation(query, user_id, session_id, streamer_queue))).start()
+#     Thread(target=lambda: asyncio.run(start_generation(query, user_id, session_id, streamer_queue))).start()
 
-    print("Waiting for the response...")
-    while True:
-        try:
-            try:
-                value = await asyncio.wait_for(streamer_queue.get(), 0.1)
+#     print("Waiting for the response...")
+#     while True:
+#         try:
+#             try:
+#                 value = await asyncio.wait_for(streamer_queue.get(), 0.1)
                 
-                if value == "options":
-                    collecting_options = True
-                    continue
-                elif value is None:
-                    options_text = ''.join(options_list)
-                    matches = re.search(r'\[(.*?)\]', options_text)
-                    if matches:
-                        options = [
-                            opt.strip().strip('"').strip()
-                            for opt in matches.group(1).split(',')
-                        ]
-                        widget["widget"] = options
-                        yield f"data: {widget}\n\n"
-                    break
+#                 if value == "options":
+#                     collecting_options = True
+#                     continue
+#                 elif value is None:
+#                     options_text = ''.join(options_list)
+#                     matches = re.search(r'\[(.*?)\]', options_text)
+#                     if matches:
+#                         options = [
+#                             opt.strip().strip('"').strip()
+#                             for opt in matches.group(1).split(',')
+#                         ]
+#                         widget["widget"] = options
+#                         yield f"data: {widget}\n\n"
+#                     break
                 
-                if collecting_options:
-                    options_list.append(value)
-                else:
-                    if value == '":':
-                        start_stream = True
-                        continue
-                    if start_stream:
-                        print(value, end="", flush=True)
-                        yield f"data: {value}\n\n"
+#                 if collecting_options:
+#                     options_list.append(value)
+#                 else:
+#                     if value == '":':
+#                         start_stream = True
+#                         continue
+#                     if start_stream:
+#                         print(value, end="", flush=True)
+#                         yield f"data: {value}\n\n"
                 
-                streamer_queue.task_done()
-            except asyncio.TimeoutError:
-                continue
-        except Exception as e:
-            print(f"Error in response_generator: {str(e)}")
-            yield f"data: Error: {str(e)}\n\n"
-            break
+#                 streamer_queue.task_done()
+#             except asyncio.TimeoutError:
+#                 continue
+#         except Exception as e:
+#             print(f"Error in response_generator: {str(e)}")
+#             yield f"data: Error: {str(e)}\n\n"
+#             break
     
 
 
@@ -131,7 +133,7 @@ async def response_generator(query, user_id, session_id):
 @app.post("/stream_chat/")
 async def stream_chat(body: ChatRequest):
     return StreamingResponse(
-        response_generator(body.content, body.user_id, body.session_id), 
+        start_generation(body.content, body.user_id, body.session_id), 
         media_type="text/event-stream"
     )
 

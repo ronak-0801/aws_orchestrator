@@ -20,12 +20,21 @@ load_dotenv()
 
 memory_storage = InMemoryChatStorage()
 
+custom_system_prompt = {
+                "template": """CRITICAL: You are a JSON pass-through agent.
+Your only task is to return the exact JSON context provided, with zero modifications.
+Do not add text, do not modify structure, do not format anything and dont add any other text.
+Return the raw JSON context exactly as provided.
+"""
+}
+
 
 class IsometrikRetrieverOptions:
-    def __init__(self, endpoint: str, auth_token: str, agent_id: str):
+    def __init__(self, endpoint: str, auth_token: str, agent_id: str, session_id: str):
         self.endpoint = endpoint
         self.auth_token = auth_token
         self.agent_id = agent_id
+        self.session_id = session_id
 
 
 class IsometrikRetriever(Retriever):
@@ -51,7 +60,7 @@ class IsometrikRetriever(Retriever):
             }
 
             payload = {
-                "session_id": "retrieval_session", 
+                "session_id": self.options.session_id, 
                 "message": text,
                 "agent_id": self.options.agent_id,
             }
@@ -63,9 +72,11 @@ class IsometrikRetriever(Retriever):
             if response.status_code != 200:
                 print(f"Retriever error: HTTP {response.status_code} - {response.text}")
                 raise Exception(f"HTTP error! status: {response.status_code}")
-
+            
+            
             content = response.text
             data = json.loads(content)
+            print(data)
             return data
 
         except Exception as e:
@@ -75,7 +86,6 @@ class IsometrikRetriever(Retriever):
     async def retrieve_and_combine_results(self, text: str) -> Dict[str, Any]:
 
         results = await self.retrieve(text)
-
         return self._combine_results(results)
 
     @staticmethod
@@ -90,6 +100,7 @@ def create_query_retriever():
             endpoint=os.getenv("QUERY_AGENT_API_URL"),
             auth_token=os.getenv("QUERY_AGENT_AUTH_TOKEN"),
             agent_id=os.getenv("QUERY_AGENT_ID"),
+            session_id=os.getenv("QUERY_AGENT_SESSION_ID"),
         )
     )
 
@@ -100,6 +111,7 @@ def create_order_retriever():
             endpoint=os.getenv("ORDER_AGENT_API_URL"),
             auth_token=os.getenv("ORDER_AGENT_AUTH_TOKEN"),
             agent_id=os.getenv("ORDER_AGENT_ID"),
+            session_id=os.getenv("ORDER_AGENT_SESSION_ID"),
         )
     )
 
@@ -110,6 +122,7 @@ def create_ecom_manager_retriever():
             endpoint=os.getenv("MANAGER_AGENT_API_URL"),
             auth_token=os.getenv("MANAGER_AGENT_AUTH_TOKEN"),
             agent_id=os.getenv("MANAGER_AGENT_ID"),
+            session_id=os.getenv("MANAGER_AGENT_SESSION_ID"),
         )
     )
 
@@ -120,6 +133,7 @@ def create_subscription_retriever():
             endpoint=os.getenv("SUBSCRIPTION_AGENT_API_URL"),
             auth_token=os.getenv("SUBSCRIPTION_AGENT_AUTH_TOKEN"),
             agent_id=os.getenv("SUBSCRIPTION_AGENT_ID"),
+            session_id=os.getenv("SESSION_ID"),
         )
     )
 
@@ -130,6 +144,7 @@ def create_product_retriever():
             endpoint=os.getenv("PRODUCT_AGENT_API_URL"),
             auth_token=os.getenv("PRODUCT_AGENT_AUTH_TOKEN"),
             agent_id=os.getenv("PRODUCT_AGENT_ID"),
+            session_id=os.getenv("PRODUCT_AGENT_SESSION_ID"),
         )
     )
 
@@ -143,15 +158,7 @@ def create_query_agent():
             model="gpt-4o-mini",
             streaming=False,
             retriever=create_query_retriever(),
-            custom_system_prompt={
-                "template": """CRITICAL: You are a JSON pass-through agent.
-Your only task is to return the exact JSON context provided, with zero modifications.
-Do not add text, do not modify structure, do not format.
-Return the raw JSON exactly as received.
-
-{{context}}""",
-                "variables": {},
-            },
+            custom_system_prompt=custom_system_prompt
         )
     )
 
@@ -165,15 +172,7 @@ def create_order_agent():
             model="gpt-4o-mini",
             streaming=False,
             retriever=create_order_retriever(),
-            custom_system_prompt={
-                "template": """CRITICAL: You are a JSON pass-through agent.
-Your only task is to return the exact JSON context provided, with zero modifications.
-Do not add text, do not modify structure, do not format.
-Return the raw JSON exactly as received.
-
-{{context}}""",
-                "variables": {},
-            },
+            custom_system_prompt=custom_system_prompt
         )
     )
 
@@ -181,21 +180,13 @@ Return the raw JSON exactly as received.
 def create_manager_agent():
     return OpenAIAgent(
         OpenAIAgentOptions(
-            name="Manager Agent",
+            name="Eco Manager Agent",
             description="Specializes in finding toxin-free, eco-friendly solutions for home and personal care",
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o-mini",
             streaming=False,
             retriever=create_ecom_manager_retriever(),
-            custom_system_prompt={
-                "template": """CRITICAL: You are a JSON pass-through agent.
-Your only task is to return the exact JSON context provided, with zero modifications.
-Do not add text, do not modify structure, do not format.
-Return the raw JSON exactly as received.
-
-{{context}}""",
-                "variables": {},
-            },
+            custom_system_prompt=custom_system_prompt
         )
     )
 
@@ -209,6 +200,7 @@ def create_subscription_agent():
             model="gpt-4o-mini",
             streaming=False,
             retriever=create_subscription_retriever(),
+            custom_system_prompt=custom_system_prompt
         )
     )
 
@@ -216,12 +208,13 @@ def create_subscription_agent():
 def create_product_agent():
     return OpenAIAgent(
         OpenAIAgentOptions(
-            name="Product Agent",
-            description="Specializes in providing detailed product information including ingredients, usage instructions, benefits, and specifications",
+            name="Product Details Agent",
+            description="Specializes in providing detailed product information, recommendations, comparisons, and purchase advice.",
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o-mini",
             streaming=False,
             retriever=create_product_retriever(),
+            custom_system_prompt=custom_system_prompt
         )
     )
 
@@ -244,7 +237,7 @@ def create_orchestrator():
             MAX_MESSAGE_PAIRS_PER_AGENT=8,
         ),
         classifier=custom_openai_classifier,
-        storage=memory_storage,
+        # storage=memory_storage,
     )
 
     query_agent = create_query_agent()
@@ -279,29 +272,33 @@ def create_orchestrator():
         Guidelines for classification:
 
         1. Agent Type: Choose the most appropriate agent based on the nature of the query.
-           - Query Agent: General product information including ingredients, FAQs, and basic inquiries
+           - Query Agent: General product information including greetings, FAQs, and basic inquiries
            - Order Agent: Order status, tracking, processing, and shipping
-           - Manager Agent: Eco-friendly products, toxin-free solutions, sustainable living
+           - Eco Manager Agent: Eco-friendly products, toxin-free solutions, sustainable living
            - Subscription Agent: Subscription-related queries
-           - Product Agent: Detailed product information including ingredients, usage instructions, benefits, and specifications
+           - Product Details Agent: Detailed product information, recommendations, comparisons, and purchase advice.
 
         2. Priority: Assign based on urgency and impact.
-           - High: Issues affecting service, urgent requests
-           - Medium: Non-urgent product inquiries, general questions
-           - Low: Information requests, browsing
+           - High: Issues affecting service, urgent requests, or critical product information.
+           - Medium: Non-urgent product inquiries, general questions, or subscription management.
+           - Low: Information requests, browsing, or vague inquiries.
 
         3. Key Entities: Extract important product names, issues, or specific requests mentioned.
            For follow-ups, include relevant entities from previous interactions.
 
         4. Confidence: Indicate how confident you are in the classification.
-           - High: Clear, straightforward requests or clear follow-ups
-           - Medium: Requests with some ambiguity but likely classification
-           - Low: Vague or multi-faceted requests that could fit multiple categories
+           - High: Clear, straightforward requests or clear follow-ups.
+           - Medium: Requests with some ambiguity but likely classification.
+           - Low: Vague or multi-faceted requests that could fit multiple categories.
 
         5. Is Followup: Indicate whether the input is a follow-up to a previous interaction.
 
-        Handle variations in user input, including different phrasings, synonyms,
-        and potential spelling errors.
+        Specific Classification Rules:
+        - If the user asks about general information or product searches or perticular product or category → Query Agent.
+        - If the user asks about order status, tracking, or shipping, past orders → Order Agent.
+        - If the user asks about subscription management, billing, or account status → Subscription Agent.
+        - If the user asks for detailed product specifications, recommendations, comparisons, or purchase advice , main target is product or category recommendations → Product Details Agent.
+        - If the user asks about eco-friendly alternatives, sustainable products, or environmental impact → Eco Manager Agent.
 
         For short responses like "yes", "ok", "I want to know more", or numerical answers,
         treat them as follow-ups and maintain the previous agent selection.
